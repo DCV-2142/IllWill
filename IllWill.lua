@@ -106,6 +106,7 @@ local function EnsureDB()
   if IllWillDB.debug == nil then IllWillDB.debug = false end
   if IllWillDB.dwNameSubstr == nil then IllWillDB.dwNameSubstr = DEFAULT_DW_NAME_SUBSTR end
 
+  if IllWillDB.shown == nil then IllWillDB.shown = false end
   if IllWillDB.minimalUI == nil then IllWillDB.minimalUI = false end
   if type(IllWillDB.pos) ~= "table" then
     IllWillDB.pos = { point="CENTER", relPoint="CENTER", x=0, y=0 }
@@ -355,8 +356,6 @@ local function UI_ApplyMode()
 
     -- In Vanilla 1.12, SetBackdrop(nil) can error; keep a backdrop but make it fully transparent.
     if f.SetBackdrop then f:SetBackdrop(MAIN_BACKDROP) end
-    if f.SetBackdropColor then f:SetBackdropColor(1, 1, 1, 1) end
-    if f.SetBackdropBorderColor then f:SetBackdropBorderColor(1, 1, 1, 1) end
     if f.SetBackdropColor then f:SetBackdropColor(0, 0, 0, 0) end
     if f.SetBackdropBorderColor then f:SetBackdropBorderColor(0, 0, 0, 0) end
 
@@ -374,6 +373,10 @@ local function UI_ApplyMode()
     if sb then sb:Hide() end
   else
     SetDecorShown(true)
+
+    -- Restore full-mode frame size (minimal mode shrinks it to fit rows)
+    f:SetWidth(250)
+    f:SetHeight(300)
 
     if f.SetBackdrop then f:SetBackdrop(MAIN_BACKDROP) end
     if f.SetBackdropColor then f:SetBackdropColor(1, 1, 1, 1) end
@@ -407,7 +410,14 @@ function IW:SetMinimalUI(on)
 end
 
 local function EnsureRow(i, parent, y)
-  if IW.rows[i] then return IW.rows[i] end
+  if IW.rows[i] then
+    -- Reposition in case sort order changed
+    local row = IW.rows[i]
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, y)
+    row:SetParent(parent)
+    return row
+  end
 
   local row = CreateFrame("Frame", nil, parent)
   row:SetHeight(16)
@@ -568,6 +578,12 @@ UI_ApplyMode()
     SavePosition()
   end)
 
+  -- Catch any hide path (X button, Escape, etc.) so shown state persists
+  f:SetScript("OnHide", function()
+    EnsureDB()
+    IllWillDB.shown = false
+  end)
+
   RestorePosition()
   f:SetScale(IllWillDB.scale or 1.0)
   ApplyLockState()
@@ -577,12 +593,16 @@ end
 
 function IW:Show()
   UI_Build()
+  EnsureDB()
   IW_UI:Show()
+  IllWillDB.shown = true
   IW:Scan()
   IW:UpdateDisplay()
 end
 
 function IW:Hide()
+  EnsureDB()
+  IllWillDB.shown = false
   if IW_UI then IW_UI:Hide() end
 end
 
@@ -598,7 +618,12 @@ end
 function IW:ResetAll()
   IW.warriors = {}
   IW.order = {}
-  IW.rows = {}
+  -- Hide all existing row frames but keep them for reuse (no :Destroy() in 1.12)
+  local j = 1
+  while IW.rows[j] do
+    IW.rows[j]:Hide()
+    j = j + 1
+  end
   Print("Reset counts + timers.")
 end
 
@@ -809,7 +834,11 @@ engine:SetScript("OnEvent", function()
 
   -- On entering world, do an initial scan
   if event == "PLAYER_ENTERING_WORLD" then
+    EnsureDB()
     IW:Scan()
+    if IllWillDB.shown then
+      IW:Show()
+    end
     IW:UpdateDisplay()
   end
 end)
